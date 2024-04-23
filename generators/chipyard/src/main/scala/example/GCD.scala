@@ -45,14 +45,6 @@ trait HasGCDIO extends BaseModule {
   val io = IO(new GCDIO(w))
 }
 
-// DOC include start: GCD blackbox
-class GCDMMIOBlackBox(val w: Int) extends BlackBox(Map("WIDTH" -> IntParam(w))) with HasBlackBoxResource
-  with HasGCDIO
-{
-  addResource("/vsrc/GCDMMIOBlackBox.v")
-}
-// DOC include end: GCD blackbox
-
 // DOC include start: GCD chisel
 class GCDMMIOChiselModule(val w: Int) extends Module
   with HasGCDIO
@@ -107,11 +99,7 @@ trait GCDModule extends HasRegMap {
   val gcd = Wire(new DecoupledIO(UInt(params.width.W)))
   val status = Wire(UInt(2.W))
 
-  val impl = if (params.useBlackBox) {
-    Module(new GCDMMIOBlackBox(params.width))
-  } else {
-    Module(new GCDMMIOChiselModule(params.width))
-  }
+  val impl = Module(new GCDMMIOChiselModule(params.width))
 
   impl.io.clock := clock
   impl.io.reset := reset.asBool
@@ -148,49 +136,16 @@ class GCDTL(params: GCDParams, beatBytes: Int)(implicit p: Parameters)
       new TLRegBundle(params, _) with GCDTopIO)(
       new TLRegModule(params, _, _) with GCDModule)
 
-class GCDAXI4(params: GCDParams, beatBytes: Int)(implicit p: Parameters)
-  extends AXI4RegisterRouter(
-    params.address,
-    beatBytes=beatBytes)(
-      new AXI4RegBundle(params, _) with GCDTopIO)(
-      new AXI4RegModule(params, _, _) with GCDModule)
 // DOC include end: GCD router
 
 // DOC include start: GCD lazy trait
 trait CanHavePeripheryGCD { this: BaseSubsystem =>
-  private val portName = "gcd"
-
-  // Only build if we are using the TL (nonAXI4) version
-  val gcd_busy = p(GCDKey) match {
+  p(GCDKey) match {
     case Some(params) => {
-      val gcd = if (params.useAXI4) {
-        val gcd = pbus { LazyModule(new GCDAXI4(params, pbus.beatBytes)(p)) }
-        pbus.coupleTo(portName) {
-          gcd.node :=
-          AXI4Buffer () :=
-          TLToAXI4 () :=
-          // toVariableWidthSlave doesn't use holdFirstDeny, which TLToAXI4() needsx
-          TLFragmenter(pbus.beatBytes, pbus.blockBytes, holdFirstDeny = true) := _
-        }
-        gcd
-      } else {
-        val gcd = pbus { LazyModule(new GCDTL(params, pbus.beatBytes)(p)) }
-        pbus.coupleTo(portName) { gcd.node := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _ }
-        gcd
-      }
-      val pbus_io = pbus { InModuleBody {
-        val busy = IO(Output(Bool()))
-        busy := gcd.module.io.gcd_busy
-        busy
-      }}
-      val gcd_busy = InModuleBody {
-        val busy = IO(Output(Bool())).suggestName("gcd_busy")
-        busy := pbus_io
-        busy
-      }
-      Some(gcd_busy)
+      val gcd = pbus { LazyModule(new GCDTL(params, pbus.beatBytes)(p)) }
+      pbus.coupleTo("gcd") { gcd.node := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _ }
     }
-    case None => None
+    case None => {}
   }
 }
 // DOC include end: GCD lazy trait
