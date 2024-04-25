@@ -10,6 +10,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{HasRegMap, RegField}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.UIntIsOneOf
+import freechips.rocketchip.rocket.RegFile
 
 case class CheeseParams(
   address: BigInt = 0x4000,
@@ -30,8 +31,6 @@ trait CheeseModule extends HasRegMap {
 
   implicit val p: Parameters
   def params: CheeseParams
-  val clock: Clock
-  val reset: Reset
 
   io.cheese_busy := true.B
 
@@ -53,6 +52,40 @@ trait CheeseModule extends HasRegMap {
     lock_state(i) := !lock_acquire(i).ready && (lock_state(i) || lock_release(i).valid)
   }
 
+
+  val queue_depth = 4
+
+  val queue_pop = Wire(new DecoupledIO(UInt(params.width.W)))
+  val queue_push = Wire(new DecoupledIO(UInt(params.width.W)))
+  val queue_acquire = Wire(new DecoupledIO(Bool()))
+  val queue_slots = RegInit(VecInit(Seq.fill(queue_depth){0.U(params.width.W)}))
+  val queue_shift_n = Wire(Vec(queue_depth, Bool()))
+  val queue_sem = RegInit(0.U(width = 3.W))
+  
+  queue_pop.valid := true.B
+  queue_pop.bits := queue_slots(0)
+  queue_acquire.valid := true.B
+  queue_acquire.bits := queue_sem =/= queue_depth.U
+  queue_push.ready := true.B
+
+  //  - if queue_acquire.ready and sem != depth, sem goes up
+  //  - if queue_pop.ready and queue_slots(0) != 0, sem goes down
+  queue_sem := queue_sem + 
+                (queue_acquire.ready && queue_sem =/= queue_depth.U) - 
+                (queue_pop.ready && queue_slots(0) =/= 0.U)
+
+  // shifts:    0       1     2      3
+  // slots: [0] <- [1] <- [2] <- [3] <- (push or 0) 
+
+  queue_shift_n(0) := queue_pop.ready || queue_slots(0) === 0.U
+  for (i <- 1 until queue_depth) {
+    queue_shift_n(i) := queue_shift_n(i-1) || queue_slots(i) === 0.U
+    queue_slots(i-1) := Mux(queue_shift_n(i-1), queue_slots(i), queue_slots(i-1))
+  }
+  queue_slots(queue_depth-1) := Mux(queue_shift_n(queue_depth-1), 
+      Mux(queue_push.valid, queue_push.bits, 0.U), queue_slots(queue_depth-1))
+
+
   regmap(
     0x00 -> Seq(RegField(1, lock_acquire(0), lock_release(0))), // sets lock_acquire.ready on read, lock_release.valid on write
     0x04 -> Seq(RegField(1, lock_acquire(1), lock_release(1))), // sets lock_acquire.ready on read, lock_release.valid on write
@@ -62,6 +95,8 @@ trait CheeseModule extends HasRegMap {
     0x14 -> Seq(RegField(1, lock_acquire(5), lock_release(5))), // sets lock_acquire.ready on read, lock_release.valid on write
     0x18 -> Seq(RegField(1, lock_acquire(6), lock_release(6))), // sets lock_acquire.ready on read, lock_release.valid on write
     0x1C -> Seq(RegField(1, lock_acquire(7), lock_release(7))), // sets lock_acquire.ready on read, lock_release.valid on write
+    0x20 -> Seq(RegField(params.width, queue_pop, queue_push)),
+    0x24 -> Seq(RegField.r(1, queue_acquire))
   )
 }
 
@@ -76,8 +111,8 @@ class CheeseTL(params: CheeseParams, beatBytes: Int)(implicit p: Parameters)
 trait CanHavePeripheryCheese { this: BaseSubsystem =>
   p(CheeseKey) match {
     case Some(params) => {
-      val cheese = pbus { LazyModule(new CheeseTL(params, pbus.beatBytes)(p)) }
-      pbus.coupleTo("cheese") { cheese.node := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _ }
+      val cheese = sbus { LazyModule(new CheeseTL(params, sbus.beatBytes)(p)) }
+      sbus.coupleTo("cheese") { cheese.node := TLFragmenter(sbus.beatBytes, sbus.blockBytes) := _ }
     }
     case None => {}
   }
