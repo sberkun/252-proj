@@ -24,7 +24,7 @@ class GCDTLRocketConfig extends Config(
 
 class CheeseRocketConfig extends Config(
   new chipyard.example.WithCheese ++
-  new freechips.rocketchip.subsystem.WithNBigCores(1) ++
+  new freechips.rocketchip.subsystem.WithNBigCores(4) ++
   new chipyard.config.AbstractConfig)
 
 // DOC include start: GCDAXI4BlackBoxRocketConfig
