@@ -1,5 +1,5 @@
 #include "locks_queues.h"
-
+#include <stdio.h>
 
 
 
