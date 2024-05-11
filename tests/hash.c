@@ -61,14 +61,16 @@ int get(HashMap *map, int key) {
     return 0;  // Key not found
 }
 
-// Main function to test the hash map
 int main() {
     HashMap map;
     initHashMap(&map);
     srand(42);
     printf("Initialized\n");
 
+    int found = 0;
     int n_elements = 100;
+
+    int t1 = rdcycle();
 
     // Inserting 100 random ints
     for (int i = 0; i < n_elements; i++) {
@@ -85,7 +87,6 @@ int main() {
     printf("Passed barrier\n");
 
     // Fetch 100 random ints
-    int found = 0;
     for (int i = 0; i < n_elements; i++) {
         int key = rand() % n_elements;
         if (get(&map, key)) {
@@ -93,6 +94,9 @@ int main() {
         }
     }
 
+    int t2 = rdcycle();
+
+    printf("done! %d %d\n", t1, t2);
     printf("Found %d/%d keys.\n", found, n_elements);
 
     return 0;
