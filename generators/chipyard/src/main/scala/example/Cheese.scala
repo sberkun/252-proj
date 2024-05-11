@@ -11,6 +11,7 @@ import freechips.rocketchip.regmapper.{HasRegMap, RegField}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.UIntIsOneOf
 import freechips.rocketchip.rocket.RegFile
+import scala.annotation.meta.param
 
 case class CheeseParams(
   address: BigInt = 0x4000,
@@ -51,6 +52,41 @@ trait CheeseModule extends HasRegMap {
     lock_acquire(i).bits := lock_state(i) || lock_release(i).valid
     lock_state(i) := !lock_acquire(i).ready && (lock_state(i) || lock_release(i).valid)
   }
+
+
+  
+  var N = 4 // number of cores; one nugget per core
+  val nugget_acquire = Seq.fill(N)(Wire(new DecoupledIO(Bool())))
+  val nugget_release = Seq.fill(N)(Wire(new DecoupledIO(Bool())))
+  val nugget_value = Seq.fill(N)(RegInit(0.U(params.width.W)))
+  val nugget_locked = Seq.fill(N)(RegInit(false.B))
+
+  nugget_release.foreach(_.ready := true.B)
+  nugget_acquire.foreach(_.valid := true.B)
+
+  // conflict(i,j) means j is blocking i
+  val nug_conflict = Seq.fill(N * N)(Wire(Bool()))
+  val will_acq = Seq.fill(N)(Wire(Bool()))
+  for (i <- 0 until N) {
+    for (j <- 0 until N) {
+      if (i == 0 && j == 0) {
+        nug_conflict(i * N + j) := false.B
+      } else if (i == j) {
+        nug_conflict(i * N + j) := nug_conflict(i * N + j - 1)
+      } else if (j == 0) {
+        nug_conflict(i * N + j) := ((nugget_value(i) === nugget_value(j)) && nugget_locked(j))
+      } else if (j < i) {
+        nug_conflict(i * N + j) := nug_conflict(i * N + j - 1) || ((nugget_value(i) === nugget_value(j)) && nugget_locked(j))
+      } else {
+        nug_conflict(i * N + j) := nug_conflict(i * N + j - 1) || ((nugget_value(i) === nugget_value(j)) && (nugget_acquire(j).ready || nugget_locked(j))) 
+      }
+    }
+    will_acq(i) := (!nug_conflict(i * N + N - 1)) && nugget_acquire(i).ready
+
+    nugget_locked(i) := will_acq(i) || (nugget_locked(i) && !nugget_release(i).valid);
+    nugget_acquire(i).bits := will_acq(i)
+  }
+
 
 
   val queue_depth = 4
@@ -95,8 +131,18 @@ trait CheeseModule extends HasRegMap {
     0x14 -> Seq(RegField(1, lock_acquire(5), lock_release(5))), // sets lock_acquire.ready on read, lock_release.valid on write
     0x18 -> Seq(RegField(1, lock_acquire(6), lock_release(6))), // sets lock_acquire.ready on read, lock_release.valid on write
     0x1C -> Seq(RegField(1, lock_acquire(7), lock_release(7))), // sets lock_acquire.ready on read, lock_release.valid on write
+
     0x20 -> Seq(RegField(params.width, queue_pop, queue_push)),
-    0x24 -> Seq(RegField.r(1, queue_acquire))
+    0x24 -> Seq(RegField.r(1, queue_acquire)),
+
+    0x40 -> Seq(RegField(1, nugget_acquire(0), nugget_release(0))),
+    0x44 -> Seq(RegField(params.width, nugget_value(0))),
+    0x48 -> Seq(RegField(1, nugget_acquire(1), nugget_release(1))),
+    0x4C -> Seq(RegField(params.width, nugget_value(1))),
+    0x50 -> Seq(RegField(1, nugget_acquire(2), nugget_release(2))),
+    0x54 -> Seq(RegField(params.width, nugget_value(2))),
+    0x58 -> Seq(RegField(1, nugget_acquire(3), nugget_release(3))),
+    0x5C -> Seq(RegField(params.width, nugget_value(3))),
   )
 }
 

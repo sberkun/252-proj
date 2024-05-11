@@ -29,7 +29,8 @@ include libgloss.mk
 
 PROGRAMS = pwm blkdev accum charcount cheese nic-loopback big-blkdev pingd \
            streaming-passthrough streaming-fir nvdla spiflashread spiflashwrite fft gcd \
-           hello mt-hello symmetric bench potato potato2 potato3 hash hash_builtin
+           hello mt-hello symmetric bench potato potato2 potato3 potato4 hash hash_builtin \
+		   busactivity busactivity2 mcdonalds hashbrown hashbrown2
 
 
 .DEFAULT_GOAL := default

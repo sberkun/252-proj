@@ -48,6 +48,26 @@ inline static void lock_release(int lock_num) {
 }
 
 
+
+#define MONITOR_BASE 0x4040
+
+  inline static void monitor_acquire(uintptr_t lock_id, int hartid) {
+    uintptr_t lock_addr = MONITOR_BASE + (hartid << 3);
+    reg_write32(lock_addr + 4, lock_id);
+    uint8_t ack;
+    do {
+      ack = reg_read8(lock_addr);
+    } while(ack == 0);
+  }
+
+  inline static void monitor_release(int hartid) {
+    uintptr_t lock_addr = MONITOR_BASE + (hartid << 3);
+    reg_write8(lock_addr, 0);
+  }
+
+
+
+
 #define QUEUE_BASE 0x4020
 #define QUEUE_DEPTH 4
 #define NUM_QUEUES 4
